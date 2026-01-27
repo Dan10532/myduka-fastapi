@@ -12,6 +12,8 @@ from fastapi.security import (
     OAuth2PasswordBearer,
     OAuth2PasswordRequestForm,
     SecurityScopes,
+    HTTPBearer
+    
 )
 #from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
@@ -21,7 +23,7 @@ ALGORITHM = "HS256"
 password_hash = PasswordHash.recommended()
 SECRET_KEY = "3q45wgte67u8l;0-i'[plokiujnyhbtgvrfdefrghtyulkoiujyhtgrfd]"
 
-oauth2_scheme = OAuth2PasswordBearer(
+oauth2_scheme = HTTPBearer(
     tokenUrl="token",
     scopes={"me": "Read information about the current user.", "items": "Read items."},
 )
@@ -93,7 +95,7 @@ async def get_current_user(
         token_data = TokenData(scopes=token_scopes, username=username)
     except Exception:
         raise credentials_exception
-    user = get_user(token_data.username)
+    user = get_user(token_data.fullname)
     if user is None:
         raise credentials_exception
     for scope in security_scopes.scopes:

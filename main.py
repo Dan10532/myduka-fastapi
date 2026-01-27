@@ -5,14 +5,10 @@ from models import Base,engine,SessionLocal
 from sqlalchemy import select
 from jsonmap import ProductGetMap, ProductPostMap, SaleGetMap, SalePostMap, UserPostRegister, UserPostLogin
 from models import Product,Sale,User
-from myjwt import create_access_token, authenticate_user,get_password_hash,verify_password
+from myjwt import create_access_token, authenticate_user,get_password_hash,verify_password,get_current_user
 from datetime import timedelta
 from jsonmap import Token
-from fastapi.security import (
-    OAuth2PasswordBearer,
-    OAuth2PasswordRequestForm,
-    SecurityScopes,
-)
+
 
 
 app = FastAPI()
@@ -44,7 +40,7 @@ def register_user(user: UserPostRegister):
     # Create User model object
     model_obj = User(
         email=user.email,
-        username=user.username,
+        fullname=user.fullname,
         password=hashed_password
     )
 
@@ -57,8 +53,8 @@ def register_user(user: UserPostRegister):
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={
-            "sub": user.email,  # store email in JWT
-            "scope": "",        # default scopes
+            "sub": user.email  # store email in JWT
+            # "scope": "",        # default scopes
         },
         expires_delta=access_token_expires
     )
@@ -67,10 +63,9 @@ def register_user(user: UserPostRegister):
     return Token(access_token=access_token, token_type="bearer")
 
 @app.post("/login", response_model=Token)
-def login_user(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
-):
-    user = authenticate_user(form_data.username, form_data.password)
+def login_user(user: UserPostLogin):
+    
+    user = authenticate_user(user.email, user.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -80,8 +75,8 @@ def login_user(
     access_token_expires = timedelta(minutes=30)
     access_token = create_access_token(
         data={
-            "sub": user.email,
-            "scope": " ".join(form_data.scopes),
+            "sub": user.email
+            # "scope": " ".join(form_data.scopes)
         },
         expires_delta=access_token_expires,
     )
@@ -92,8 +87,12 @@ def login_user(
    
 
 @app.get("/products", response_model=List[ProductGetMap])
-def get_products():
+def get_products(
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    print(f"Current user--------------------------: {current_user.email}")
     products=select(Product)
+
     return SessionLocal.scalars(products)
 
 @app.post("/products", response_model=ProductGetMap)
@@ -110,7 +109,9 @@ def create_product(json_product_obj: ProductPostMap):
     
 
 @app.get("/sales",response_model=List[SaleGetMap])
-def get_sales():
+def get_sales(
+     current_user: Annotated[User, Depends(get_current_user)]
+):
     sales=select(Sale).options(selectinload(Sale.product))
     return SessionLocal.scalars(sales).all()
 

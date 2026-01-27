@@ -1,9 +1,10 @@
-from pydantic import BaseModel, ConfigDict
+
+from pydantic import BaseModel
 from datetime import datetime
 
 class UserPostRegister(BaseModel):
     email: str
-    username: str | None = None
+    fullname: str 
     password: str
 
 class UserPostLogin(BaseModel):
@@ -24,13 +25,13 @@ class SalePostMap(BaseModel):
     quantity: int
 
 class SaleGetMap(SalePostMap):
-    #name: str
     id: int
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
- 
 class TokenData(BaseModel):
     email: str | None = None
     scopes: list[str] = []

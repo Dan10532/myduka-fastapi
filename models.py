@@ -30,11 +30,11 @@ class Base(DeclarativeBase):
 
 
 class User(Base):
-    __tablename__ = "fastapiusers"
+    __tablename__ = "fastapi_usersp"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    fullname: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     password: Mapped[str] = mapped_column(String(100), nullable=False)
 
 class Product(Base):
