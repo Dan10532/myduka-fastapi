@@ -5,25 +5,37 @@ from sqlalchemy import String
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import mapped_column
-from sqlalchemy.orm import relationship,sessionmaker
+from sqlalchemy.orm import relationship,Session
 from datetime import datetime
 
+
 from sqlalchemy import create_engine
-DATABASE_URL='postgresql://postgres:Nazo@localhost:5432/flaskapi'
+DATABASE_URL = "postgresql://postgres:Mdan10532@localhost:5432/flask_shop"
 
 
 engine = create_engine(
     DATABASE_URL
 )
 
-SessionLocal = sessionmaker(
+SessionLocal = Session(
     autocommit=False,
     autoflush=False,
     bind=engine
 )
 
+
 class Base(DeclarativeBase):
      pass
+
+
+
+class User(Base):
+    __tablename__ = "fastapiusers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    password: Mapped[str] = mapped_column(String(100), nullable=False)
 
 class Product(Base):
     __tablename__ = "products"
