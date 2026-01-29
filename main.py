@@ -5,10 +5,9 @@ from models import Base,engine,SessionLocal
 from sqlalchemy import select
 from jsonmap import ProductGetMap, ProductPostMap, SaleGetMap, SalePostMap, UserPostRegister, UserPostLogin
 from models import Product,Sale,User
-from myjwt import create_access_token, authenticate_user,get_password_hash,verify_password,get_current_user
+from myjwt import create_access_token, authenticate_user,get_password_hash,verify_password,get_current_user,security,HTTPAuthorizationCredentials
 from datetime import timedelta
-from jsonmap import Token
-
+from jsonmap import Token, TokenData
 
 
 app = FastAPI()
@@ -18,9 +17,9 @@ app = FastAPI()
 def create_tables():
     Base.metadata.create_all(bind=engine)
 
-
 @app.get("/")
 def read_root():
+    
     return {"Duka FastAPI": "Version 1.0"}
 
 @app.post("/register", response_model=Token)
@@ -83,20 +82,20 @@ def login_user(user: UserPostLogin):
 
     return Token(access_token=access_token, token_type="bearer")
 
-
-   
-
 @app.get("/products", response_model=List[ProductGetMap])
 def get_products(
     current_user: Annotated[User, Depends(get_current_user)]
 ):
-    print(f"Current user--------------------------: {current_user.email}")
+    print(f"Current user--------------------------: {current_user}")
     products=select(Product)
 
     return SessionLocal.scalars(products)
 
 @app.post("/products", response_model=ProductGetMap)
-def create_product(json_product_obj: ProductPostMap):
+def create_product(
+    json_product_obj: ProductPostMap,
+    current_user:  HTTPAuthorizationCredentials = Depends(security)
+):
     model_obj=Product(
         name=json_product_obj.name,
         buying_price=json_product_obj.buying_price,
@@ -106,17 +105,18 @@ def create_product(json_product_obj: ProductPostMap):
     SessionLocal.commit()
     return model_obj
 
-    
-
 @app.get("/sales",response_model=List[SaleGetMap])
 def get_sales(
-     current_user: Annotated[User, Depends(get_current_user)]
+    current_user: Annotated[User, Depends(security)]
 ):
     sales=select(Sale).options(selectinload(Sale.product))
     return SessionLocal.scalars(sales).all()
 
 @app.post("/sales", response_model=SaleGetMap)
-def create_sale(json_sale_obj: SalePostMap):
+def create_sale(
+    current_user: Annotated[User, Depends(security)],
+    json_sale_obj: SalePostMap
+):
     model_obj=Sale(
         product_id=json_sale_obj.product_id,
         quantity=json_sale_obj.quantity

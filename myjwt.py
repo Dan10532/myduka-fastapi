@@ -5,17 +5,17 @@ from jsonmap import TokenData
 from sqlalchemy import select
 
 
-#import jwt
+# import jwt
 from jose import JWTError, jwt
 from fastapi import Depends, FastAPI, HTTPException, Security, status
 from fastapi.security import (
-    OAuth2PasswordBearer,
-    OAuth2PasswordRequestForm,
+    HTTPBearer,
     SecurityScopes,
-    HTTPBearer
-    
+    HTTPAuthorizationCredentials
 )
-#from jwt.exceptions import InvalidTokenError
+
+
+# from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
 ALGORITHM = "HS256"
 
@@ -23,10 +23,7 @@ ALGORITHM = "HS256"
 password_hash = PasswordHash.recommended()
 SECRET_KEY = "3q45wgte67u8l;0-i'[plokiujnyhbtgvrfdefrghtyulkoiujyhtgrfd]"
 
-oauth2_scheme = HTTPBearer(
-    tokenUrl="token",
-    scopes={"me": "Read information about the current user.", "items": "Read items."},
-)
+security = HTTPBearer()
 
 
 def verify_password(plain_password, hashed_password):
@@ -45,12 +42,11 @@ def get_password_hash(password):
         user_dict = db[username]
         return UserInDB(**user_dict) """
 
+
 def get_user(email: str):
     return SessionLocal.execute(
         select(User).where(User.email == email)
     ).scalar_one_or_none()
-
-
 
 
 def authenticate_user(email: str, password: str):
@@ -64,6 +60,8 @@ def authenticate_user(email: str, password: str):
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
     to_encode = data.copy()
+    to_encode["scope"] = "user"
+    print(f"Data to encode in JWT--------------------------: {to_encode}")
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
@@ -74,8 +72,9 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
 
 
 async def get_current_user(
-    security_scopes: SecurityScopes, token: Annotated[str, Depends(oauth2_scheme)]
+    security_scopes: SecurityScopes, token: Annotated[str, (security)]
 ):
+    print
     if security_scopes.scopes:
         authenticate_value = f'Bearer scope="{security_scopes.scope_str}"'
     else:
@@ -85,17 +84,23 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": authenticate_value},
     )
+    print(f"Token received in get_current_user--------------------------: {token}")
+    print(f"Security scopes in get_current_user--------------------------: {security_scopes.scopes}")
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    print(f"Payload decoded from JWT--------------------------------: {payload}")
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        if username is None:
+        print(f"Payload decoded from JWT--------------------------------: {payload}")
+        email = payload.get("sub")
+        if email is None:
             raise credentials_exception
         scope: str = payload.get("scope", "")
-        token_scopes = scope.split(" ")
-        token_data = TokenData(scopes=token_scopes, username=username)
+        # 
+        token_scopes = "user"
+        token_data = TokenData(scopes=token_scopes, email=email)
     except Exception:
         raise credentials_exception
-    user = get_user(token_data.fullname)
+    user = get_user(token_data.email)
     if user is None:
         raise credentials_exception
     for scope in security_scopes.scopes:
