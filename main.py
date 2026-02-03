@@ -1,126 +1,219 @@
-from typing import Union, List, Annotated
-from fastapi import FastAPI, Depends,HTTPException, status
-from sqlalchemy.orm import Session,selectinload
-from models import Base,engine,SessionLocal
-from sqlalchemy import select
-from jsonmap import ProductGetMap, ProductPostMap, SaleGetMap, SalePostMap, UserPostRegister, UserPostLogin
-from models import Product,Sale,User
-from myjwt import create_access_token, authenticate_user,get_password_hash,verify_password,get_current_user,security,HTTPAuthorizationCredentials
+from typing import List, Annotated
 from datetime import timedelta
-from jsonmap import Token, TokenData
 
+from fastapi import FastAPI, Depends, HTTPException, status
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import select, func
 
-app = FastAPI()
+from models import (
+    Base, engine, SessionLocal,
+    Product, Sale, User, Purchase
+)
 
-# Create tables on startup
+from jsonmap import (
+    ProductGetMap, ProductPostMap,
+    SaleGetMap, SalePostMap,
+    PurchaseGetMap, PurchasePostMap,
+    UserPostRegister, UserPostLogin,
+    SalesPerProduct, StockPerProduct,
+    Token
+)
+
+from myjwt import (
+    create_access_token,
+    authenticate_user,
+    get_password_hash,
+    get_current_user
+)
+
+app = FastAPI(title="Duka FastAPI")
+
+# =========================
+# DATABASE DEPENDENCY
+# =========================
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# =========================
+# STARTUP
+# =========================
 @app.on_event("startup")
 def create_tables():
     Base.metadata.create_all(bind=engine)
 
+# =========================
+# ROOT
+# =========================
 @app.get("/")
 def read_root():
-    
     return {"Duka FastAPI": "Version 1.0"}
 
+# =========================
+# AUTH
+# =========================
 @app.post("/register", response_model=Token)
-def register_user(user: UserPostRegister):
-    # Check if email is already registered
-    if SessionLocal.execute(
+def register_user(
+    user: UserPostRegister,
+    db: Session = Depends(get_db)
+):
+    existing_user = db.execute(
         select(User).where(User.email == user.email)
-    ).scalar_one_or_none():
+    ).scalar_one_or_none()
+    if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
 
-    # Hash the password
     hashed_password = get_password_hash(user.password)
+    model_obj = User(email=user.email, fullname=user.fullname, password=hashed_password)
 
-    # Create User model object
-    model_obj = User(
-        email=user.email,
-        fullname=user.fullname,
-        password=hashed_password
-    )
+    db.add(model_obj)
+    db.commit()
+    db.refresh(model_obj)
 
-    # Save to database
-    SessionLocal.add(model_obj)
-    SessionLocal.commit()
-
-    # Create access token (default scopes empty)
-    ACCESS_TOKEN_EXPIRE_MINUTES = 30
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={
-            "sub": user.email  # store email in JWT
-            # "scope": "",        # default scopes
-        },
-        expires_delta=access_token_expires
+        data={"sub": user.email},
+        expires_delta=timedelta(minutes=30)
     )
 
-    # Return the token
-    return Token(access_token=access_token, token_type="bearer")
+    return {"access_token": access_token, "token_type": "bearer"}
+
 
 @app.post("/login", response_model=Token)
 def login_user(user: UserPostLogin):
-    
-    user = authenticate_user(user.email, user.password)
-    if not user:
+    auth_user = authenticate_user(user.email, user.password)
+    if not auth_user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
 
-    access_token_expires = timedelta(minutes=30)
     access_token = create_access_token(
-        data={
-            "sub": user.email
-            # "scope": " ".join(form_data.scopes)
-        },
-        expires_delta=access_token_expires,
+        data={"sub": auth_user.email},
+        expires_delta=timedelta(minutes=30)
     )
 
-    return Token(access_token=access_token, token_type="bearer")
+    return {"access_token": access_token, "token_type": "bearer"}
 
+# =========================
+# PRODUCTS
+# =========================
 @app.get("/products", response_model=List[ProductGetMap])
 def get_products(
-    current_user: Annotated[User, Depends(get_current_user)]
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db)
 ):
-    print(f"Current user--------------------------: {current_user}")
-    products=select(Product)
-
-    return SessionLocal.scalars(products)
+    return db.execute(select(Product)).scalars().all()
 
 @app.post("/products", response_model=ProductGetMap)
 def create_product(
     json_product_obj: ProductPostMap,
-    current_user:  HTTPAuthorizationCredentials = Depends(security)
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db)
 ):
-    model_obj=Product(
-        name=json_product_obj.name,
-        buying_price=json_product_obj.buying_price,
-        selling_price=json_product_obj.selling_price
-    )
-    SessionLocal.add(model_obj)
-    SessionLocal.commit()
+    model_obj = Product(**json_product_obj.model_dump())
+    db.add(model_obj)
+    db.commit()
+    db.refresh(model_obj)
     return model_obj
 
-@app.get("/sales",response_model=List[SaleGetMap])
+# =========================
+# SALES
+# =========================
+@app.get("/sales", response_model=List[SaleGetMap])
 def get_sales(
-    current_user: Annotated[User, Depends(security)]
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db)
 ):
-    sales=select(Sale).options(selectinload(Sale.product))
-    return SessionLocal.scalars(sales).all()
+    return db.execute(
+        select(Sale).options(selectinload(Sale.product))
+    ).scalars().all()
 
 @app.post("/sales", response_model=SaleGetMap)
 def create_sale(
-    current_user: Annotated[User, Depends(security)],
-    json_sale_obj: SalePostMap
+    json_sale_obj: SalePostMap,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db)
 ):
-    model_obj=Sale(
-        product_id=json_sale_obj.product_id,
-        quantity=json_sale_obj.quantity
+    sale = Sale(**json_sale_obj.model_dump())
+    db.add(sale)
+    db.commit()
+    db.refresh(sale)
+    return sale
+
+# =========================
+# PURCHASES
+# =========================
+@app.get("/purchases", response_model=List[PurchaseGetMap])
+def get_purchases(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db)
+):
+    return db.execute(
+        select(Purchase).options(selectinload(Purchase.product))
+    ).scalars().all()
+
+@app.post("/purchases", response_model=PurchaseGetMap)
+def create_purchase(
+    json_purchase_obj: PurchasePostMap,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db)
+):
+    purchase = Purchase(**json_purchase_obj.model_dump())
+    db.add(purchase)
+    db.commit()
+    db.refresh(purchase)
+    return purchase
+
+# =========================
+# DASHBOARD
+# =========================
+@app.get("/dashboard/sales-per-product", response_model=List[SalesPerProduct])
+def sales_per_product(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db)
+):
+    return (
+        db.query(
+            Product.id.label("product_id"),
+            Product.name.label("product_name"),
+            func.coalesce(func.sum(Sale.quantity), 0).label("total_quantity_sold"),
+            func.coalesce(func.sum(Sale.quantity * Product.selling_price), 0).label("total_sales_amount"),
+        )
+        .outerjoin(Sale, Product.id == Sale.product_id)
+        .group_by(Product.id)
+        .all()
     )
-    SessionLocal.add(model_obj)
-    SessionLocal.commit()
-    return model_obj
+
+@app.get("/dashboard/stock-per-product", response_model=List[StockPerProduct])
+def stock_per_product(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Session = Depends(get_db)
+):
+    sales_sub = (
+        db.query(Sale.product_id, func.sum(Sale.quantity).label("sold"))
+        .group_by(Sale.product_id)
+        .subquery()
+    )
+
+    purchase_sub = (
+        db.query(Purchase.product_id, func.sum(Purchase.quantity).label("purchased"))
+        .group_by(Purchase.product_id)
+        .subquery()
+    )
+
+    return (
+        db.query(
+            Product.id.label("product_id"),
+            Product.name.label("product_name"),
+            (func.coalesce(purchase_sub.c.purchased, 0) - func.coalesce(sales_sub.c.sold, 0)).label("remaining_stock")
+        )
+        .outerjoin(sales_sub, Product.id == sales_sub.c.product_id)
+        .outerjoin(purchase_sub, Product.id == purchase_sub.c.product_id)
+        .all()
+    )
