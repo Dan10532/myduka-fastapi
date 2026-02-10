@@ -47,28 +47,44 @@ class SaleGetMap(SalePostMap):
 # ===============================
 class PurchasePostMap(BaseModel):
     product_id: int
-    quantity: int
+    stock_quantity: int
+    created_at: datetime
 
 class PurchaseGetMap(PurchasePostMap):
     id: int
-    created_at: datetime
-
-    class Config:
-        orm_mode = True
 
 # ===============================
 # DASHBOARD SCHEMAS
 # ===============================
 class SalesPerProduct(BaseModel):
-    product_id: int
-    product_name: str
-    total_quantity_sold: int
-    total_sales_amount: float
+    data: list[int]
+    labels: list[str]
+   
+   
 
 class StockPerProduct(BaseModel):
     product_id: int
     product_name: str
     remaining_stock: int
+
+# ===============================
+# PROFIT SCHEMAS
+# ===============================
+    
+class  ProfitPerProduct(BaseModel):
+    product_id: int
+    product_name: str
+    total_profit: float
+
+class ProfitPerDay(BaseModel):
+    date: datetime
+    total_profit: float
+
+class ProfitPerProductPerDay(BaseModel):
+    date: datetime
+    product_id: int
+    product_name: str
+    total_profit: float
 
 # ===============================
 # TOKEN SCHEMAS

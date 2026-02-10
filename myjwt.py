@@ -72,46 +72,23 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
 
 
 async def get_current_user(
-    security_scopes: SecurityScopes, token: Annotated[str, (security)]
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)]
 ):
-    print
-    if security_scopes.scopes:
-        authenticate_value = f'Bearer scope="{security_scopes.scope_str}"'
-    else:
-        authenticate_value = "Bearer"
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": authenticate_value},
-    )
-    print(f"Token received in get_current_user--------------------------: {token}")
-    print(f"Security scopes in get_current_user--------------------------: {security_scopes.scopes}")
-    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    print(f"Payload decoded from JWT--------------------------------: {payload}")
+    token = credentials.credentials  # <-- RAW token from Swagger
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        print(f"Payload decoded from JWT--------------------------------: {payload}")
-        email = payload.get("sub")
+        email: str = payload.get("sub")
         if email is None:
-            raise credentials_exception
-        scope: str = payload.get("scope", "")
-        # 
-        token_scopes = "user"
-        token_data = TokenData(scopes=token_scopes, email=email)
-    except Exception:
-        raise credentials_exception
-    user = get_user(token_data.email)
-    if user is None:
-        raise credentials_exception
-    for scope in security_scopes.scopes:
-        if scope not in token_data.scopes:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Not enough permissions",
-                headers={"WWW-Authenticate": authenticate_value},
-            )
-    return user
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
+    user = get_user(email=email)
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    return user
 
 async def get_current_active_user(
     current_user: Annotated[User, Security(get_current_user, scopes=["me"])],
