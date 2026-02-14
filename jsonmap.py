@@ -6,8 +6,8 @@ from typing import Optional
 # USER SCHEMAS
 # ===============================
 class UserPostRegister(BaseModel):
-    email: str
     fullname: str
+    email: str
     password: str
 
 class UserPostLogin(BaseModel):
@@ -48,7 +48,7 @@ class SaleGetMap(SalePostMap):
 class PurchasePostMap(BaseModel):
     product_id: int
     stock_quantity: int
-    created_at: datetime
+    created_at: Optional[datetime] = None
 
 class PurchaseGetMap(PurchasePostMap):
     id: int

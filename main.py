@@ -1,7 +1,7 @@
 # =========================
 # Standard Library Imports
 # =========================
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Annotated, List
 
 # =========================
@@ -58,6 +58,8 @@ app.add_middleware(
 # =========================
 # Startup Event
 # =========================
+
+
 @app.on_event("startup")
 def create_tables():
     Base.metadata.create_all(bind=engine)
@@ -69,9 +71,6 @@ def create_tables():
 @app.get("/")
 def read_root():
     return {"Duka FastAPI": "Version 1.0"}
-
-
-
 
 
 # =========================
@@ -182,6 +181,31 @@ def create_sale(json_sale_obj: SalePostMap):
     return model_obj
 
 
+@app.put("/sales/{sale_id}", response_model=SaleGetMap)
+def update_sale(sale_id: int, sale: SalePostMap):
+    db_sale = SessionLocal.get(Sale, sale_id)
+    if not db_sale:
+        raise HTTPException(status_code=404, detail="Sale not found")
+
+    db_sale.product_id = sale.product_id
+    db_sale.quantity = sale.quantity
+
+    SessionLocal.commit()
+    return db_sale
+
+
+@app.delete("/sales/{sale_id}")
+def delete_sale(sale_id: int):
+    sale = SessionLocal.get(Sale, sale_id)
+    if not sale:
+        raise HTTPException(status_code=404, detail="Sale not found")
+    SessionLocal.delete(sale)
+    SessionLocal.commit()
+    return {"message": "Sale deleted successfully"}
+
+
+
+
 # =========================
 # Purchase Routes
 # =========================
@@ -198,16 +222,40 @@ def create_purchase(json_purchase_obj: PurchasePostMap):
     model_obj = Purchase(
         product_id=json_purchase_obj.product_id,
         stock_quantity=json_purchase_obj.stock_quantity,
-        created_at=json_purchase_obj.created_at,
+        created_at=datetime.utcnow(),
     )
     SessionLocal.add(model_obj)
     SessionLocal.commit()
     return model_obj
 
 
+@app.delete("/purchases/{product_id}")
+def delete_purchase(product_id: int):
+    purchase = SessionLocal.get(Purchase, product_id)
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+    SessionLocal.delete(purchase)
+    SessionLocal.commit()
+    return {"message": "Purchase deleted successfully"}
+
+
+@app.put("/purchases/{purchase_id}", response_model=PurchaseGetMap)
+def update_purchase(purchase_id: int, purchase: PurchasePostMap):
+    db_purchase = SessionLocal.get(Purchase, purchase_id)
+    if not db_purchase:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+
+    db_purchase.product_id = purchase.product_id
+    db_purchase.stock_quantity = purchase.stock_quantity
+
+    SessionLocal.commit()
+    return db_purchase
+
 # =========================
 # Dashboard Routes
 # =========================
+
+
 @app.get("/dashboard/spp", response_model=List[SalesPerProduct])
 def get_sales_per_product(
     current_user: Annotated[User, Depends(get_current_user)],
