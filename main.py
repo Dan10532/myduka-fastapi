@@ -1,131 +1,82 @@
 # =========================
-# Standard Library Imports
+# STANDARD LIBRARIES
 # =========================
 from datetime import datetime, timedelta
-from typing import Annotated, List
+from typing import List
 
 # =========================
-# FastAPI Imports
+# FASTAPI
 # =========================
 from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.security import (
-    OAuth2PasswordBearer,
-    OAuth2PasswordRequestForm,
-    SecurityScopes,
-    HTTPBearer,
-    HTTPAuthorizationCredentials,
-)
+from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 
 # =========================
-# SQLAlchemy Imports
+# SQLALCHEMY
 # =========================
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 
 # =========================
-# Local App Imports
+# LOCAL IMPORTS
 # =========================
-from models import (Base, engine, SessionLocal, Product, Sale, Purchase, User,
-                    )
+from models import Base, engine, SessionLocal, Product, Sale, Purchase, User
 
 from jsonmap import (
-    ProductGetMap, ProductPostMap, PurchaseGetMap, PurchasePostMap, SaleGetMap, SalePostMap, SalesPerProduct,
-    UserPostRegister, UserPostLogin, Token,
+    ProductGetMap, ProductPostMap,
+    PurchaseGetMap, PurchasePostMap,
+    SaleGetMap, SalePostMap,
+    SalesPerProduct,
+    UserPostRegister, UserPostLogin,
+    Token
 )
 
-from myjwt import (create_access_token,
-                   authenticate_user, get_current_user, get_password_hash, verify_password,
-                   )
+from mpesa import make_stk_push
+from myjwt import (
+    create_access_token,
+    authenticate_user,
+    get_current_user,
+    get_password_hash,
+)
 
 # =========================
-# App & Security Setup
+# APP SETUP
 # =========================
 app = FastAPI()
-bearer_scheme = HTTPBearer()
-
-
-origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # =========================
-# Startup Event
+# STARTUP
 # =========================
-
-
 @app.on_event("startup")
-def create_tables():
+def startup():
     Base.metadata.create_all(bind=engine)
 
-
 # =========================
-# Root Endpoint
+# ROOT
 # =========================
 @app.get("/")
-def read_root():
-    return {"Duka FastAPI": "Version 1.0"}
-
+def root():
+    return {"message": "Duka API running 🚀"}
 
 # =========================
-# Authentication Routes
+# AUTH ROUTES
 # =========================
-@app.post("/token", tags=["auth"])
+@app.post("/token", response_model=Token, tags=["auth"])
 def login_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = authenticate_user(form_data.email, form_data.password)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    user = authenticate_user(form_data.username, form_data.password)
 
-    token = create_access_token(user.email)
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-    }
-
-
-@app.post("/register", response_model=Token)
-def register_user(user: UserPostRegister):
-    if SessionLocal.execute(
-        select(User).where(User.email == user.email)
-    ).scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered",
-        )
-
-    hashed_password = get_password_hash(user.password)
-
-    model_obj = User(
-        email=user.email,
-        fullname=user.fullname,
-        password=hashed_password,
-    )
-
-    SessionLocal.add(model_obj)
-    SessionLocal.commit()
-
-    access_token_expires = timedelta(minutes=30)
-    access_token = create_access_token(
-        data={"sub": user.email, "scope": ""},
-        expires_delta=access_token_expires,
-    )
-
-    return Token(access_token=access_token, token_type="bearer")
-
-
-@app.post("/login", response_model=Token)
-def login_user(user: UserPostLogin):
-    user = authenticate_user(user.email, user.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+            detail="Invalid credentials",
         )
 
     access_token = create_access_token(
@@ -133,57 +84,104 @@ def login_user(user: UserPostLogin):
         expires_delta=timedelta(minutes=30),
     )
 
-    return Token(access_token=access_token, token_type="bearer")
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.post("/login", response_model=Token)
+def login_user(user: UserPostLogin):
+    db_user = authenticate_user(user.email, user.password)
+
+    if not db_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    access_token = create_access_token(
+        data={"sub": db_user.email},
+        expires_delta=timedelta(minutes=30),
+    )
+
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.post("/register", response_model=Token)
+def register_user(user: UserPostRegister):
+    existing_user = SessionLocal.execute(
+        select(User).where(User.email == user.email)
+    ).scalar_one_or_none()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered",
+        )
+
+    new_user = User(
+        fullname=user.fullname,
+        email=user.email,
+        password=get_password_hash(user.password),
+    )
+
+    SessionLocal.add(new_user)
+    SessionLocal.commit()
+
+    access_token = create_access_token(
+        data={"sub": new_user.email},
+        expires_delta=timedelta(minutes=30),
+    )
+
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 # =========================
-# Product Routes
+# PRODUCT ROUTES
 # =========================
 @app.get("/products", response_model=List[ProductGetMap])
-def get_products(
-    current_user: Annotated[User, Depends(get_current_user)],
-):
+def get_products():
     products = select(Product)
-    return SessionLocal.scalars(products)
+    return SessionLocal.scalars(products).all()
 
 
 @app.post("/products", response_model=ProductGetMap)
-def create_product(json_product_obj: ProductPostMap):
-    model_obj = Product(
-        name=json_product_obj.name,
-        buying_price=json_product_obj.buying_price,
-        selling_price=json_product_obj.selling_price,
+def create_product(product: ProductPostMap):
+    new_product = Product(
+        name=product.name,
+        buying_price=product.buying_price,
+        selling_price=product.selling_price,
     )
-    SessionLocal.add(model_obj)
+
+    SessionLocal.add(new_product)
     SessionLocal.commit()
-    return model_obj
+    return new_product
 
 
 # =========================
-# Sales Routes
+# SALES ROUTES
 # =========================
 @app.get("/sales", response_model=List[SaleGetMap])
-def get_sales(
-    current_user: Annotated[User, Depends(get_current_user)],
-):
+def get_sales(current_user: User = Depends(get_current_user)):
     sales = select(Sale).options(selectinload(Sale.product))
     return SessionLocal.scalars(sales).all()
 
 
 @app.post("/sales", response_model=SaleGetMap)
-def create_sale(json_sale_obj: SalePostMap):
-    model_obj = Sale(
-        product_id=json_sale_obj.product_id,
-        quantity=json_sale_obj.quantity,
+def create_sale(sale: SalePostMap):
+    new_sale = Sale(
+        product_id=sale.product_id,
+        quantity=sale.quantity,
+        created_at=datetime.utcnow(),
     )
-    SessionLocal.add(model_obj)
+
+    SessionLocal.add(new_sale)
     SessionLocal.commit()
-    return model_obj
+    return new_sale
 
 
 @app.put("/sales/{sale_id}", response_model=SaleGetMap)
 def update_sale(sale_id: int, sale: SalePostMap):
     db_sale = SessionLocal.get(Sale, sale_id)
+
     if not db_sale:
         raise HTTPException(status_code=404, detail="Sale not found")
 
@@ -197,51 +195,41 @@ def update_sale(sale_id: int, sale: SalePostMap):
 @app.delete("/sales/{sale_id}")
 def delete_sale(sale_id: int):
     sale = SessionLocal.get(Sale, sale_id)
+
     if not sale:
         raise HTTPException(status_code=404, detail="Sale not found")
+
     SessionLocal.delete(sale)
     SessionLocal.commit()
-    return {"message": "Sale deleted successfully"}
-
-
+    return {"message": "Sale deleted"}
 
 
 # =========================
-# Purchase Routes
+# PURCHASE ROUTES
 # =========================
 @app.get("/purchases", response_model=List[PurchaseGetMap])
-def get_purchases(
-    current_user: Annotated[User, Depends(get_current_user)],
-):
+def get_purchases(current_user: User = Depends(get_current_user)):
     purchases = select(Purchase)
     return SessionLocal.scalars(purchases).all()
 
 
 @app.post("/purchases", response_model=PurchaseGetMap)
-def create_purchase(json_purchase_obj: PurchasePostMap):
-    model_obj = Purchase(
-        product_id=json_purchase_obj.product_id,
-        stock_quantity=json_purchase_obj.stock_quantity,
+def create_purchase(purchase: PurchasePostMap):
+    new_purchase = Purchase(
+        product_id=purchase.product_id,
+        stock_quantity=purchase.stock_quantity,
         created_at=datetime.utcnow(),
     )
-    SessionLocal.add(model_obj)
-    SessionLocal.commit()
-    return model_obj
 
-
-@app.delete("/purchases/{product_id}")
-def delete_purchase(product_id: int):
-    purchase = SessionLocal.get(Purchase, product_id)
-    if not purchase:
-        raise HTTPException(status_code=404, detail="Purchase not found")
-    SessionLocal.delete(purchase)
+    SessionLocal.add(new_purchase)
     SessionLocal.commit()
-    return {"message": "Purchase deleted successfully"}
+    return new_purchase
 
 
 @app.put("/purchases/{purchase_id}", response_model=PurchaseGetMap)
 def update_purchase(purchase_id: int, purchase: PurchasePostMap):
     db_purchase = SessionLocal.get(Purchase, purchase_id)
+
     if not db_purchase:
         raise HTTPException(status_code=404, detail="Purchase not found")
 
@@ -251,35 +239,48 @@ def update_purchase(purchase_id: int, purchase: PurchasePostMap):
     SessionLocal.commit()
     return db_purchase
 
-# =========================
-# Dashboard Routes
-# =========================
+
+@app.delete("/purchases/{purchase_id}")
+def delete_purchase(purchase_id: int):
+    purchase = SessionLocal.get(Purchase, purchase_id)
+
+    if not purchase:
+        raise HTTPException(status_code=404, detail="Purchase not found")
+
+    SessionLocal.delete(purchase)
+    SessionLocal.commit()
+    return {"message": "Purchase deleted"}
 
 
+# =========================
+# DASHBOARD
+# =========================
 @app.get("/dashboard/spp", response_model=List[SalesPerProduct])
-def get_sales_per_product(
-    current_user: Annotated[User, Depends(get_current_user)],
-):
-    sales_data = SessionLocal.execute(
+def sales_per_product(current_user: User = Depends(get_current_user)):
+    results = SessionLocal.execute(
         select(
             Sale.product_id,
-            Product.name.label("product_name"),
-            func.sum(Sale.quantity).label("total_quantity_sold"),
-            func.sum(Sale.quantity *
-                     Product.selling_price).label("total_sales_amount"),
+            Product.name,
+            func.sum(Sale.quantity),
         )
-        .join(Product, Sale.product_id == Product.id)
+        .join(Product)
         .group_by(Sale.product_id, Product.name)
     ).all()
 
-    data = [r.total_quantity_sold for r in sales_data]
-    labels = [r.product_name for r in sales_data]
+    data = [r[2] for r in results]
+    labels = [r[1] for r in results]
 
-    return [
-        SalesPerProduct(
-            data=data,
-            labels=labels
-           
-        )
-      
-    ]
+    return [SalesPerProduct(data=data, labels=labels)]
+
+app.post("/stk-push")
+def stk_push(payload: dict):        
+    try:
+        response_data = make_stk_push(payload)
+        return response_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+app.post("/stk_call_back")
+def stk_call_back(payload: dict):
+    print("STK Callback received:", payload)
+    return {"message": "Callback received"}
