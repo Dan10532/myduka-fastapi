@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  pos_api:
+    build: .
+    container_name: pos_backend
+    ports:
+      - "8000:80"
+    depends_on:
+      - my_postgres
+    networks:
+      - my_net
+
+  my_postgres:
+    image: postgres:latest
+    container_name: pos_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "Mdan10532"
+      POSTGRES_DB: flask_shop
+    ports:
+      - "5142:5432"
+    networks:
+      - my_net
+
+networks:
+  my_net:
+    driver: bridge
+    # volumes:
+    #   - .:/app
+    # command: uvicorn main:app --host 0.0.0.0

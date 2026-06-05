@@ -1,20 +1,28 @@
-import time
 import math
 import base64
-import token
-from wsgiref import headers
 import requests
+import re
 from datetime import datetime
 from requests.auth import HTTPBasicAuth
+from config import settings
 
 
-consumer_key="R7YAQpGwXUNgGCGG6d4wE6oa0GWAHjhYC1GSr1DeM5Px9Qtr"
-consumer_secret="Ba8hh6i9UWKrcEAxqxkAcP9Xc15LLMHuNkdAAdLp6fHrNUAHcXYEZhfNZyRcF6SF"
-saf_short_code="174379"
-saf_stk_push_url="https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest"
-saf_api_url = "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials"
-saf_passkey = "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919"
-saf_callback_url = "https://mydomain.com/mpesa-express-simulate/"  # Replace with your actual callback URL
+consumer_key = settings.mpesa_consumer_key
+consumer_secret = settings.mpesa_consumer_secret
+saf_short_code = settings.mpesa_short_code
+saf_stk_push_url = settings.mpesa_stk_push_url
+saf_api_url = settings.mpesa_auth_url
+saf_passkey = settings.mpesa_passkey
+saf_callback_url = settings.mpesa_callback_url.replace("/stk_call_back", "/mpesa/stk-call-back")
+
+
+def _normalize_phone_number(phone: str) -> str:
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if digits.startswith("0") and len(digits) == 10:
+        digits = "254" + digits[1:]
+    if digits.startswith("254") and len(digits) == 12:
+        return digits
+    raise ValueError("Phone number must be in format 2547XXXXXXXX")
 
 # time will be sent to stk push as part of the password, so we need to generate it in the format yyyymmddhhmmss
 # the request is for sending http like axios
@@ -24,12 +32,19 @@ saf_callback_url = "https://mydomain.com/mpesa-express-simulate/"  # Replace wit
 
 
 def get_mpesa_access_token():
+    if not consumer_key or not consumer_secret:
+        raise ValueError("MPESA_CONSUMER_KEY and MPESA_CONSUMER_SECRET must be set in .env")
     try:
         res = requests.get(
             saf_api_url,
             auth=HTTPBasicAuth(consumer_key, consumer_secret),
+            timeout=30,
         )
-        token = res.json()['access_token']
+        res.raise_for_status()
+        payload = res.json()
+        token = payload.get("access_token")
+        if not token:
+            raise ValueError(f"Failed to get M-Pesa token: {payload}")
 
        
     except Exception as e:
@@ -38,53 +53,60 @@ def get_mpesa_access_token():
 
     return token
 
-myToken = get_mpesa_access_token()
-print(myToken)
 
-headers = {
-            "Authorization": f"Bearer {myToken}",
+def generate_password(timestamp: str):
+        if not saf_passkey:
+            raise ValueError("MPESA_PASSKEY must be set in .env")
+        password_str = saf_short_code + saf_passkey + timestamp
+        password_bytes = password_str.encode()
+        return base64.b64encode(password_bytes).decode("utf-8")
+
+def make_stk_push( payload):
+        amount = float(payload['amount'])
+        if amount <= 0:
+            raise ValueError("Amount must be greater than 0")
+
+        phone_number = _normalize_phone_number(payload['phone_number'])
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        access_token = get_mpesa_access_token()
+        headers = {
+            "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
         }
 
-timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-def generate_password():
-    
-        password_str = saf_short_code + saf_passkey + timestamp
-        password_bytes = password_str.encode()
-
-        return base64.b64encode(password_bytes).decode("utf-8")
-
-password = generate_password()
-print(password)
-
-def make_stk_push( payload):
-        amount = payload['amount']
-        phone_number = payload['phone_number']
-
         push_data = {
             "BusinessShortCode": saf_short_code,
-            "Password": password,
+            "Password": generate_password(timestamp),
             "Timestamp": timestamp,
             "TransactionType": "CustomerPayBillOnline",
-            "Amount": math.ceil(float(amount)),
+            "Amount": math.ceil(amount),
             "PartyA": phone_number,
             "PartyB": saf_short_code,
             "PhoneNumber": phone_number,
             "CallBackURL": saf_callback_url,
-            "AccountReference": "Whatever you call your app",
+            "AccountReference": str(payload.get('sale_id', 'SALE'))[:12],
             "TransactionDesc": "description of the transaction",
         }
 
         response = requests.post(
             saf_stk_push_url,
             json=push_data,
-            headers=headers)
+            headers=headers,
+            timeout=30)
+        if response.status_code >= 400:
+            try:
+                error_payload = response.json()
+            except Exception:
+                error_payload = {"raw": response.text}
+            raise ValueError(f"M-Pesa STK rejected request: {error_payload}")
 
         response_data = response.json()
 
         return response_data
 
-make_stk_push({
-    "amount": 1,
-    "phone_number": "254792213329"
-})
+# make_stk_push({
+#     "amount": 1,
+#     "phone_number": "254792213329",
+#     "sale_id": "SALE001"
+
+# })

@@ -1,9 +1,11 @@
 # ===============================
 # IMPORTS
 # ===============================
-from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from typing import Optional, List
+
+from pydantic import BaseModel, EmailStr, field_validator
+from pydantic_core import PydanticCustomError
 
 
 # ===============================
@@ -12,7 +14,16 @@ from typing import Optional, List
 class UserPostRegister(BaseModel):
     fullname: str
     email: EmailStr
-    password: str = Field(min_length=6)
+    password: str
+
+    @field_validator("password")
+    def password_length(cls, value):
+        if len(value) < 6:
+            raise PydanticCustomError(
+                "password_too_short",
+                "Password must be at least 6 characters long"
+            )
+        return value
 
 
 class UserPostLogin(BaseModel):
@@ -33,7 +44,7 @@ class ProductGetMap(ProductPostMap):
     id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ===============================
@@ -49,7 +60,7 @@ class SaleGetMap(SalePostMap):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ===============================
@@ -67,7 +78,31 @@ class PurchaseGetMap(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+
+
+# ===============================
+# PAYMENT SCHEMAS
+# ===============================
+class PaymentPostMap(BaseModel):
+    sale_id: Optional[int] = None
+    phone_number: str
+    trans_amount: float
+
+
+class PaymentGetMap(BaseModel):
+    id: int
+    sale_id: Optional[int] = None
+    mrid: Optional[str] = None
+    crid: Optional[str] = None
+    trans_code: Optional[str] = None
+    trans_amount: Optional[float] = None
+    phone_number: str
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ===============================
@@ -114,5 +149,5 @@ class Token(BaseModel):
 
 
 class TokenData(BaseModel):
-    sub: Optional[str] = None   # MUST match JWT payload
+    sub: Optional[str] = None
     scopes: Optional[str] = None
